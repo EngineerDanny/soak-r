@@ -1,0 +1,5 @@
+*.RData
+*qsip_pc2_all_new-dim.C.between.sites
+*qsip_pc2_all_new-dim.CN.combine.sites
+*qsip_pc2_all_new-dim.compare.sites/
+*qsip_pc2_all_new-dim.compare.treatments/
