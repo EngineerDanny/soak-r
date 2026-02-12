@@ -8,6 +8,7 @@ plot_soak_mse_figs <- function(bmr, comparison.RData, tit,
                                p.color = "#E69F00",
                                suffixes = c("all"),
                                label_col = "site") {
+  tit <- sub("\\s*\\(SOAK[^)]*\\)\\s*$", "", tit, ignore.case = TRUE)
   
   # ---- 1) Fold-level score table ----
   score.dt <- as.data.table(mlr3resampling::score(bmr, mlr3::msr("regr.mse")))
@@ -18,21 +19,36 @@ plot_soak_mse_figs <- function(bmr, comparison.RData, tit,
   if (!"test.fold" %in% names(score.dt) && "iteration" %in% names(score.dt)) {
     setnames(score.dt, "iteration", "test.fold")
   }
+  # For this analysis view, keep only glmnet + featureless.
+  keep.algos <- c("cv_glmnet", "featureless", "regr.cv_glmnet", "regr.featureless")
+  score.dt <- score.dt[algorithm %in% keep.algos]
   
   required_cols <- c("regr.mse","algorithm","test.group","train.groups","test.fold")
   miss <- setdiff(required_cols, names(score.dt))
   if (length(miss) > 0) stop("Missing required columns: ", paste(miss, collapse=", "))
+  algo.display.order <- c("cv_glmnet", "featureless")
   
-  # ---- 2) Rows per test.group ----
+  # ---- 2) Rows per test.subset ----
   if ("test" %in% names(score.dt)) {
-    n.dt <- score.dt[, .(n.data = as.integer(median(vapply(test, length, integer(1))))),
-                     by = test.group]
+    test.sets <- score.dt[, .(test = test[[1L]]), by = .(test.group, test.fold)]
+    total.n.dt <- test.sets[, .(n.data = length(unique(unlist(test)))), by = test.group]
+    message("Exact total rows per test.subset:")
+    print(total.n.dt)
+    sum.n.dt <- test.sets[, .(sum_rows = sum(vapply(test, length, integer(1)))), by = test.group]
+    message("Sum of test rows across folds per test.subset:")
+    print(sum.n.dt)
+    test.counts <- test.sets[, .(n.test = vapply(test, length, integer(1))),
+                             by = .(test.group, test.fold)]
+    total.tests.dt <- test.counts[, .(total_test_points = sum(n.test)), by = test.group]
+    message("Total test points per test.subset (all algorithms combined):")
+    print(total.tests.dt)
+    n.dt <- total.n.dt
   } else {
     n.dt <- unique(score.dt[, .(test.group)])
     n.dt[, n.data := NA_integer_]
   }
   
-  # ---- 3) Build test.group -> label mapping from score.dt ----
+  # ---- 3) Build test.subset -> label mapping from score.dt ----
   if (!label_col %in% names(score.dt)) {
     stop("label_col='", label_col, "' not found. Available columns:\n",
          paste(names(score.dt), collapse=", "))
@@ -47,7 +63,7 @@ plot_soak_mse_figs <- function(bmr, comparison.RData, tit,
       DT[algorithm == "regr.rpart", algorithm := "rpart"]
       DT[algorithm == "regr.ranger", algorithm := "ranger"]
       DT[algorithm %in% c("regr.kknn", "kknn"), algorithm := "knn"]
-      algo_levels <- c("featureless", "knn", "rpart", "cv_glmnet", "ranger")
+      algo_levels <- c(algo.display.order)
       algo_levels <- c(algo_levels, setdiff(unique(DT$algorithm), algo_levels))
       DT[, algorithm := factor(algorithm, levels = algo_levels)]
     }
@@ -55,11 +71,11 @@ plot_soak_mse_figs <- function(bmr, comparison.RData, tit,
     # Join label
     DT[label.map, label := i.label, on = "test.group"]
     DT[is.na(label), label := as.character(test.group)]
-    DT[, `Test group` := gsub("_", "\n", paste0("\n", label))]
-    
-    # Only add Train\ngroups if train.groups exists in this DT
+    DT[, `Test subset` := gsub("_", "\n", paste0("\n", label))]
+
+    # Only add Train\nsubsets if train.groups exists in this DT
     if ("train.groups" %in% names(DT)) {
-      DT[, `Train\ngroups` := paste0("\n", train.groups)]
+      DT[, `Train\nsubsets` := paste0("\n", train.groups)]
     }
     
     # Rows annotation
@@ -77,19 +93,20 @@ plot_soak_mse_figs <- function(bmr, comparison.RData, tit,
     nfold         = .N
   ), by = .(train.groups, test.group, algorithm)]
   add_facet_vars(score.stats)
+  score.stats[, is_focus := as.character(algorithm) == "cv_glmnet"]
   
   # log scale for paired tests
   score.dt[, log10.regr.mse := log10(regr.mse)]
   
-  # ---- 6) same reference line per algorithm (only cv_glmnet + ranger) ----
-  same.algos <- c("cv_glmnet", "ranger")
-  algo_colors <- c(cv_glmnet = p.color, ranger = "#009E73")
+  # ---- 6) same reference line per algorithm (cv_glmnet only) ----
+  same.algos <- c("cv_glmnet")
+  algo_colors <- c(cv_glmnet = p.color)
   same.dt <- score.stats[train.groups == "same" & algorithm %in% same.algos,
                          .(test.group, algorithm, same_mean = regr.mse_mean)]
   vline.dt <- copy(same.dt)
   add_facet_vars(vline.dt)
   
-  # ---- 7) Paired t-tests: per algorithm other/all vs same (cv_glmnet + ranger only) ----
+  # ---- 7) Paired t-tests: per algorithm other/all vs same (cv_glmnet only) ----
   score.wide.train <- dcast(
     score.dt[algorithm %in% same.algos],
     algorithm + test.fold + test.group ~ train.groups,
@@ -118,7 +135,7 @@ plot_soak_mse_figs <- function(bmr, comparison.RData, tit,
   ][
     same.dt, on = c("test.group", "algorithm")
   ]
-  train.p.values[, label_x := (regr.mse_mean + regr.mse_sd) * 1.05]
+  train.p.values[, label_x := regr.mse_mean]
   add_facet_vars(train.p.values)
   
   # ---- 8) Plot config ----
@@ -135,38 +152,49 @@ plot_soak_mse_figs <- function(bmr, comparison.RData, tit,
         panel.spacing=grid::unit(0, "lines"),
         axis.text.x=element_text(angle=30, hjust=1)
       )+
-      geom_vline(aes(xintercept=same_mean, color=algorithm),
-                 data=vline.dt, linewidth=0.6, show.legend=FALSE)+
+      geom_vline(aes(xintercept=same_mean),
+                 color="black",
+                 alpha=0.45,
+                 data=vline.dt, linewidth=0.25, show.legend=FALSE)+
       geom_text(aes(
         x = label_x, y = algorithm,
-        label=ifelse(p.value<0.0001, "p<0.0001", sprintf("p=%.4f", p.value)),
-        color=algorithm
+        label=ifelse(p.value<0.0001, "p<0.0001", sprintf("p=%.4f", p.value))
       ),
-      vjust=-0.8, size=2.0, show.legend=FALSE,
+      color="red", hjust=0.5, vjust=-0.8, size=2.0, show.legend=FALSE,
       data=some(train.p.values, suffix))+
-      geom_point(aes(regr.mse_mean, algorithm), shape=1, data=some(score.stats, suffix))+
       geom_segment(aes(
         x = regr.mse_mean - regr.mse_sd, xend = regr.mse_mean + regr.mse_sd,
         y = algorithm, yend = algorithm
       ),
-      linewidth=1, data=some(score.stats, suffix))+
+      linewidth=1, color="grey50", alpha=0.8,
+      data=some(score.stats[is_focus == FALSE], suffix))+
+      geom_point(aes(regr.mse_mean, algorithm), shape=1, color="grey45", alpha=0.8,
+                 data=some(score.stats[is_focus == FALSE], suffix))+
+      geom_segment(aes(
+        x = regr.mse_mean - regr.mse_sd, xend = regr.mse_mean + regr.mse_sd,
+        y = algorithm, yend = algorithm
+      ),
+      linewidth=1, color="black",
+      data=some(score.stats[is_focus == TRUE], suffix))+
+      geom_point(aes(regr.mse_mean, algorithm), shape=1, color="black",
+                 data=some(score.stats[is_focus == TRUE], suffix))+
       geom_segment(aes(
         x = same_mean, xend = regr.mse_mean,
-        y = algorithm, yend = algorithm,
-        color = algorithm
+        y = algorithm, yend = algorithm
       ),
+      color="red",
       data=some(train.p.values, suffix),
       show.legend=FALSE)+
       geom_blank(aes(regr.mse, algorithm), data=score.dt)+
-      facet_grid(`Train\ngroups` ~ Rows + `Test group`,
+      facet_grid(`Train\nsubsets` ~ Rows + `Test subset`,
                  scales="free_x",
                  labeller=label_both)+
-      scale_y_discrete(drop = FALSE)+
+      scale_y_discrete(drop = TRUE, limits = rev(algo.display.order))+
       scale_color_manual(values = algo_colors, guide = "none")+
       scale_x_log10("Mean squared prediction error on test set\n(mean +/- SD over 10 folds, log scale)")
     
     out.stats <- sub("RData$", paste0(suffix, "-stats.png"), comparison.RData)
-    png(out.stats, height=5, width=(n.test+1)*1.5, units="in", res=300)
+    png(out.stats, height=3.5, width=(n.test+1)*1.5, units="in", res=300)
     print(gg.stats)
     dev.off()
     message("Wrote: ", out.stats)
@@ -175,29 +203,20 @@ plot_soak_mse_figs <- function(bmr, comparison.RData, tit,
   invisible(list(score=score.dt, stats=score.stats, p_train=train.p.values))
 }
 
-## DIM +CN between sites (test group = site)
-## DIM compare sites (all treatments within dim; test group = site)
-load("qsip_pc2_all_new-dim.compare.treatments.RData")
+
+## ---- Example runs (one at a time) ----
+## DIM +C between sites (test subset = site)
+load("qsip_pc2_all_new-dim.C.between.sites.RData")
 plot_soak_mse_figs(
-   bmr,
-   comparison.RData = "qsip_pc2_all_new-dim.compare.treatments.RData",
-   tit = "DIM compare treatments (SOAK regression)",
-   suffixes = c("all"),
-   label_col = "treatment"
- )
+  bmr,
+  comparison.RData = "qsip_pc2_all_new-dim.C.between.sites.RData",
+  tit = "DIM +C between sites (SOAK regression)",
+  suffixes = c("all"),
+  label_col = "site"
+)
 
 
-if (F){
-#load("qsip_pc2_all_new-dim.C.between.sites.RData")
-#plot_soak_mse_figs(
-#  bmr,
-#  comparison.RData="qsip_pc2_all_new-dim.C.between.sites.RData",
-#  tit="DIM +C between sites (SOAK regression)",
-#  suffixes=c("all"),
-#  label_col="site"
-# )
-
-## DIM +CN between sites (test group = site)
+## DIM +CN between sites (test subset = site)
 # load("qsip_pc2_all_new-dim.CN.combine.sites.RData")
 # plot_soak_mse_figs(
 #   bmr,
@@ -207,7 +226,7 @@ if (F){
 #   label_col = "site"
 # )
 
-## DIM compare sites (all treatments within dim; test group = site)
+## DIM compare sites (all treatments within dim; test subset = site)
 # load("qsip_pc2_all_new-dim.compare.sites.RData")
 # plot_soak_mse_figs(
 #   bmr,
@@ -217,8 +236,24 @@ if (F){
 #   label_col = "site"
 # )
 
-## DIM compare treatments (test group = treatment)
-# load("qsip_pc2_all_new-dim.compare.treatments.RData")
+## DIM compare treatments (test subset = treatment)
+load("qsip_pc2_all_new-dim.compare.treatments.RData")
+score.dt <- mlr3resampling::score(bmr)
+score.dt[, n.test := sapply(test, length)]
+score.dt[, .(n.data=sum(n.test)), keyby=.(test.subset, train.subsets)]
+n.dt <- score.dt[train.subsets=="same", .(
+  n.data=sum(n.test)
+), by=test.subset]
+
+n.dt <- score.dt[train.subsets == "same",
+                 .(n.data = sum(n.test)),
+                 by = .(test.subset, algorithm)]
+
+n.dt
+
+n.dt <- score.dt[, .(n.data = as.integer(median(vapply(test, length, integer(1))))),
+                 by = test.subset]
+n.dt
 # plot_soak_mse_figs(
 #   bmr,
 #   comparison.RData = "qsip_pc2_all_new-dim.compare.treatments.RData",
@@ -226,4 +261,3 @@ if (F){
 #   suffixes = c("all"),
 #   label_col = "treatment"
 # )
-}

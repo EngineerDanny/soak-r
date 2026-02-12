@@ -1,7 +1,5 @@
 *.RData
-*qsip_pc2_all_new-dim.C.between.sites
-*qsip_pc2_all_new-dim.CN.combine.sites
-*qsip_pc2_all_new-dim.compare.sites/
-*qsip_pc2_all_new-dim.compare.treatments/
-*qsip_pc2_all_new-dim.C_CN_control.compare.treatments/
-*qsip_pc2_all_new-dim.C_CN_control.compare.treatments.all-stats.png
+qsip_pc2_all_new-*/
+qsip_pc2_all_new-*.all-stats.png
+qsip_pc2_all_new-*.pooling-gain.png
+qsip_pooling_gain_heatmap_*.png
