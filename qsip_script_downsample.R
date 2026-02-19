@@ -14,15 +14,23 @@ compare <- function(comparison, group.var, DT) {
 # Each entry can filter on any qsip.dt column, and values can be one string or a vector.
 subset.config <- list(
   list(
-    subset_id = "dim.control",
-    filters = list(experiment = "dim", treatment = "control")
+    subset_id = "GL",
+    filters = list(experiment = "dim", treatment = "CN", site = "GL")
   ),
   list(
-    subset_id = "qme.15",
-    filters = list(experiment = "qme", treatment = "15")
+    subset_id = "PJ",
+    filters = list(experiment = "dim", treatment = "CN", site = "PJ")
+  ),
+  list(
+    subset_id = "PP",
+    filters = list(experiment = "dim", treatment = "CN", site = "PP")
+  ),
+  list(
+    subset_id = "MC",
+    filters = list(experiment = "dim", treatment = "CN", site = "MC")
   )
 )
-comparison.name <- "dim.control_vs_qme.15.downsample.sizes0.compare.subsets"
+comparison.name <- "dim.CN.between.sites.downsample.sizes0.compare.subsets"
 comparison.group.var <- "subset_id"
 
 apply_filters <- function(DT, filters) {
