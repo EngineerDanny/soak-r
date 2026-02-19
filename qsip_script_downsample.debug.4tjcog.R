@@ -10,12 +10,51 @@ compare <- function(comparison, group.var, DT) {
   data.table(comparison, group.var, DT = list(DT))
 }
 
-keep.treatments <- c("C", "CN", "control")
-dim.ccc <- qsip.dt[
-  experiment == "dim" & treatment %chin% keep.treatments
-]
-comparison.dt <- rbind(
-  compare("dim.C_CN_control.downsample.sizes0.compare.treatments", "treatment", dim.ccc)
+# Edit this block to change/add subsets.
+# Each entry can filter on any qsip.dt column, and values can be one string or a vector.
+subset.config <- list(
+  list(
+    comparison = "dim.control.downsample.sizes0.compare.treatments",
+    group.var = "treatment",
+    filters = list(experiment = "dim", treatment = "control")
+  ),
+  list(
+    comparison = "qme.15.downsample.sizes0.compare.treatments",
+    group.var = "treatment",
+    filters = list(experiment = "qme", treatment = "15")
+  )
+)
+
+apply_filters <- function(DT, filters) {
+  out <- DT
+  for (col.name in names(filters)) {
+    vals <- as.character(filters[[col.name]])
+    out <- if (length(vals) == 1L) {
+      out[get(col.name) == vals]
+    } else {
+      out[get(col.name) %chin% vals]
+    }
+  }
+  out
+}
+
+build_comparison <- function(cfg, DT) {
+  filter.cols <- names(cfg$filters)
+  missing.cols <- setdiff(filter.cols, names(DT))
+  if (length(missing.cols) > 0L) {
+    stop("Unknown filter columns: ", paste(missing.cols, collapse = ", "))
+  }
+
+  subset.dt <- apply_filters(DT, cfg$filters)
+  if (nrow(subset.dt) == 0L) {
+    warning("Subset has 0 rows for comparison: ", cfg$comparison)
+  }
+  compare(cfg$comparison, cfg$group.var, subset.dt)
+}
+
+comparison.dt <- rbindlist(
+  lapply(subset.config, build_comparison, DT = qsip.dt),
+  use.names = TRUE
 )
 
 make_downsample_cv <- function(folds = 10L, sizes = 0L) {
@@ -26,12 +65,13 @@ make_downsample_cv <- function(folds = 10L, sizes = 0L) {
 }
 
 # Optional: minimal debug run (no batchtools submit).
-if (F) {
+if (T) {
   compare.row <- comparison.dt[1]
   task.names <- c(compare.row$group.var, "growth_per_day", gene.names)
-  debug_n_per_treatment <- 200L
+  debug_n_per_group <- 200L
+  group.var <- compare.row$group.var
   task.dt <- data.table(compare.row$DT[[1]][, task.names, with = FALSE])[
-    , .SD[sample(.N, min(.N, debug_n_per_treatment))], by = treatment
+    , .SD[sample(.N, min(.N, debug_n_per_group))], by = group.var
   ]
   task.id <- paste0("debug_", compare.row$comparison)
   task <- mlr3::TaskRegr$new(
@@ -61,7 +101,7 @@ if (F) {
 }
 
 # Optional: full batchtools workflow for downsampling analysis.
-if (T) {
+if (F) {
   for (comparison.i in 1:nrow(comparison.dt)) {
     compare.row <- comparison.dt[comparison.i]
     task.names <- c(compare.row$group.var, "growth_per_day", gene.names)
