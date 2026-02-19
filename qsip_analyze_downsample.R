@@ -10,7 +10,7 @@ suppressPackageStartupMessages({
   library(mlr3resampling)
 })
 
-rdata.file <- "qsip_pc2_all_new-dim.CN.between.sites.downsample.sizes0.compare.subsets.RData"
+rdata.file <- "qsip_pc2_all_new-dim.control_vs_qme.15.downsample.sizes0.compare.subsets.RData"
 rdata.stem <- sub("\\.RData$", "", basename(rdata.file))
 pvalue.plot.dir <- paste0(rdata.stem, ".downsample-pvalue-plots")
 
